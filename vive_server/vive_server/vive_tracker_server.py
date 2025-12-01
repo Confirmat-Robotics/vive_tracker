@@ -52,7 +52,8 @@ class ViveTrackerServer(Server):
     def __init__(self, port: int, logging_queue: Queue, pipe: Optional[Connection] = None,
                  config_path: Path = Path(f"~/vive_ros2/config.yml").expanduser(),
                  buffer_length: int = 1024, should_record: bool = False,
-                 output_file_path: Path = Path(f"~/vive_ros2/data/RFS_track.txt").expanduser()):
+                 output_file_path: Path = Path(f"~/vive_ros2/data/RFS_track.txt").expanduser(),
+                 host: Optional[str] = None):
         """
         Initialize socket and OpenVR
         
@@ -62,8 +63,9 @@ class ViveTrackerServer(Server):
             buffer_length: maximum buffer (tracker_name) that it can listen to at once
             should_record: should record data or not
             output_file_path: output file's path
+            host: IP address to bind to (optional, defaults to auto-detect)
         """
-        super(ViveTrackerServer, self).__init__(port)
+        super(ViveTrackerServer, self).__init__(port, host)
         self.logger = logging.getLogger("ViveTrackerServer")
         self.logger.addHandler(logging.handlers.QueueHandler(logging_queue))
         self.logger.setLevel(logging.INFO)
@@ -499,15 +501,16 @@ class ViveTrackerServer(Server):
 
 
 def run_server(port: int, logging_queue: Queue, config: Path, pipe: Optional[Connection] = None,
-               should_record: bool = False):
+               should_record: bool = False, host: Optional[str] = None):
     vive_tracker_server = ViveTrackerServer(port=port, logging_queue=logging_queue, pipe=pipe,
-                                            config_path=config, should_record=should_record)
+                                            config_path=config, should_record=should_record, host=host)
     vive_tracker_server.run()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Vive tracker server')
     parser.add_argument('--port', default=8000, help='port to broadcast tracker data on')
+    parser.add_argument('--host', default=None, help='IP address to bind to (defaults to auto-detect)')
     parser.add_argument('--config', default=f"~/vive_ros2/config.yml",
                         help='tracker configuration file')
     args = parser.parse_args()
@@ -516,7 +519,7 @@ if __name__ == "__main__":
     config = Path(args.config).expanduser()
     string_formatter = logging.Formatter(fmt='%(asctime)s|%(name)s|%(levelname)s|%(message)s', datefmt="%H:%M:%S")
 
-    p = Process(target=run_server, args=(args.port, logger_queue, config))
+    p = Process(target=run_server, args=(args.port, logger_queue, config, None, False, args.host))
     p.start()
     try:
         # This should be updated to be a bit cleaner

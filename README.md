@@ -16,6 +16,19 @@ will create a conda environment with the correct python version and libraries. Y
 activate the environment with `conda activate pythonvr`. Start the server by running `vive_tracker_server.py` in 
 the `vive_server` folder. Make sure to have `SteamVR` installed and running with the headset plugged in.
 
+To start the server on a specific network interface (useful when you have multiple network adapters):
+
+```bash
+python vive_tracker_server.py --port 8000 --host <IP_ADDRESS>
+```
+
+For example, to bind to the wireless adapter at 192.168.2.18:
+```bash
+python vive_tracker_server.py --port 8000 --host 192.168.2.18
+```
+
+If you omit the `--host` parameter, the server will auto-detect and bind to the default network interface.
+
 Once you start the server you should see something like the following printed to the screen indicating which VR devices 
 are detected and what the ip address and port (IP:PORT) of the server is. This information will come in handy when 
 setting up the client.
@@ -39,10 +52,44 @@ Found 1 Tracker
 ```
 
 ### Running the ROS2 Client
-In order to run the ROS2 node first run `sudo python3 setup.py install` to install the
-package and supporting message objects. You may also have
-to install some packages with pip such as pydantic and scipy if they are not already installed `pip3 install pydantic scipy`.
+The ROS2 client is built using the standard ROS2/colcon build system.
 
-You can then run the node by running `ros2 run vive_ros2 vive_tracker_node.py --ros-args -p host_ip:=******** 
--p host_port:=****`. You should then be able to run `ros2 topic echo /tracker/odom` to verify 
+#### Building the package
+
+Navigate to your workspace root (not the package directory) and build with colcon:
+
+```bash
+cd /path/to/your/workspace  # e.g., ~/gitrepos
+colcon build --packages-select vive_ros2
+```
+
+Make sure you have the required dependencies installed:
+```bash
+pip install pydantic scipy
+```
+
+#### Running the node
+
+After building, source the setup file and run the node:
+
+```bash
+source install/setup.bash
+ros2 run vive_ros2 vive_tracker_node --ros-args -p host_ip:=<SERVER_IP> -p host_port:=<SERVER_PORT>
+```
+
+For example, to connect to a server at 192.168.2.18:8000:
+```bash
+ros2 run vive_ros2 vive_tracker_node --ros-args -p host_ip:=192.168.2.18 -p host_port:=8000
+```
+
+You can also specify the tracker name and topic:
+```bash
+ros2 run vive_ros2 vive_tracker_node --ros-args \
+  -p host_ip:=192.168.2.18 \
+  -p host_port:=8000 \
+  -p tracker_name:=tracker_1 \
+  -p topic:=/my_tracker/odom
+```
+
+You should then be able to run `ros2 topic echo /T_1/odom` (or your custom topic) to verify 
 the node is working.

@@ -1,16 +1,21 @@
 from glob import glob
-from setuptools import setup, find_packages
+import os
+from setuptools import setup
 
 package_name = "vive_ros2"
 
 setup(
     name=package_name,
     version="0.1.0",
-    packages=find_packages(exclude=["test", "test.*"]),
+    packages=[package_name],
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.py")),
+        ("lib/" + package_name, [
+            "scripts/vive_tracker_node",
+            "scripts/vive_tracker_client",
+        ]),
     ],
     install_requires=["setuptools", "pydantic", "scipy"],
     zip_safe=True,

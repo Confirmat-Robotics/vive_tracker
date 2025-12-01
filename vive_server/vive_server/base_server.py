@@ -5,9 +5,9 @@ import logging
 
 
 class Server(ABC):
-    def __init__(self, port):
+    def __init__(self, port, host=None):
         self.port = port
-        self.ip = socket.gethostbyname(socket.gethostname())
+        self.ip = host if host else socket.gethostbyname(socket.gethostname())
         self.socket: Optional[socket.socket] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 20)
         self.logger = logging.getLogger("Base Server")
