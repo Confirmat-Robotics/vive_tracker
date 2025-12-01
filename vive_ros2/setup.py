@@ -18,7 +18,6 @@ setup(
     maintainer_email="michaelrequi@gmail.com",
     description="ROS 2 interface for streaming Vive Tracker pose data.",
     license="MIT",
-    tests_require=["pytest"],
     python_requires=">=3.8",
     entry_points={
         "console_scripts": [
