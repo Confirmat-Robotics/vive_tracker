@@ -93,6 +93,10 @@ class ViveTrackerServer(Server):
         if not self.output_file_path.exists():
             self.output_file_path.parent.mkdir(parents=True, exist_ok=True)
         self.output_file = self.output_file_path.open('w')
+        
+        # Track connected clients
+        self.connected_clients = set()  # Store (addr, tracker_name) tuples
+        self.has_logged_waiting = False  # Track if we've logged the waiting message
         self.buffer_length = buffer_length
 
     def run(self):
@@ -111,6 +115,7 @@ class ViveTrackerServer(Server):
         """
         self.logger.info(f"Starting server at {self.ip}:{self.port}")
         self.logger.info("Connected VR devices: \n###########\n" + str(self.triad_openvr) + "###########")
+        self.logger.info("Waiting for client connections...")
         # Main server loop
         while True:
             # Transmit data over the network
@@ -118,6 +123,13 @@ class ViveTrackerServer(Server):
                 tracker_name, addr = self.socket.recvfrom(self.buffer_length)
                 tracker_name = tracker_name.decode()
                 tracker_key = self.resolve_name_to_key(tracker_name)
+                
+                # Log new client connections
+                client_id = (addr, tracker_name)
+                if client_id not in self.connected_clients:
+                    self.connected_clients.add(client_id)
+                    self.logger.info(f"New client connected from {addr[0]}:{addr[1]} requesting tracker '{tracker_name}'")
+                
                 if tracker_key in self.get_tracker_keys():
                     message = self.poll_tracker(tracker_key=tracker_key)
                     if message is not None:
@@ -128,7 +140,7 @@ class ViveTrackerServer(Server):
                 else:
                     self.logger.error(f"Tracker {tracker_name} with key {tracker_key} not found")
             except socket.timeout:
-                self.logger.info("Did not receive connection from client")
+                pass  # Silent timeout - no need to log every 3 seconds
             except Exception as e:
                 self.logger.error(e)
 
