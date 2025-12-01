@@ -7,7 +7,8 @@ import json
 import logging
 import logging.handlers
 import socket
-from multiprocessing import Queue, Process, Pipe
+from multiprocessing import Queue, Process
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import List
 from typing import Optional
@@ -18,7 +19,6 @@ import time
 import os
 
 from base_server import Server
-from gui import GuiManager
 from models import ViveDynamicObjectMessage, ViveStaticObjectMessage, Configuration
 from triad_openvr import TriadOpenVR
 
@@ -49,9 +49,9 @@ class ViveTrackerServer(Server):
 
     """
 
-    def __init__(self, port: int, pipe: Pipe, logging_queue: Queue,
+    def __init__(self, port: int, logging_queue: Queue, pipe: Optional[Connection] = None,
                  config_path: Path = Path(f"~/vive_ros2/config.yml").expanduser(),
-                 use_gui: bool = False, buffer_length: int = 1024, should_record: bool = False,
+                 buffer_length: int = 1024, should_record: bool = False,
                  output_file_path: Path = Path(f"~/vive_ros2/data/RFS_track.txt").expanduser()):
         """
         Initialize socket and OpenVR
@@ -68,7 +68,6 @@ class ViveTrackerServer(Server):
         self.logger.addHandler(logging.handlers.QueueHandler(logging_queue))
         self.logger.setLevel(logging.INFO)
         self.pipe = pipe
-        self.use_gui = use_gui
         self.config_path = config_path
         self.config = Configuration()
 
@@ -112,7 +111,6 @@ class ViveTrackerServer(Server):
         self.logger.info("Connected VR devices: \n###########\n" + str(self.triad_openvr) + "###########")
         # Main server loop
         while True:
-            messages = {"state": {}}
             # Transmit data over the network
             try:
                 tracker_name, addr = self.socket.recvfrom(self.buffer_length)
@@ -120,7 +118,6 @@ class ViveTrackerServer(Server):
                 tracker_key = self.resolve_name_to_key(tracker_name)
                 if tracker_key in self.get_tracker_keys():
                     message = self.poll_tracker(tracker_key=tracker_key)
-                    messages["state"][tracker_key] = message
                     if message is not None:
                         socket_message = construct_socket_msg(data=message)
                         self.socket.sendto(socket_message.encode(), addr)
@@ -133,38 +130,20 @@ class ViveTrackerServer(Server):
             except Exception as e:
                 self.logger.error(e)
 
-            # See if any commands have been sent from the gui
-            while self.pipe.poll():
-                data = self.pipe.recv()
-                if "config" in data:
-                    self.config = data["config"]
-                    self.logger.info(f"Configuration updated")
-                if "save" in data:
-                    self.save_config(data["save"])
-                if "refresh" in data:
-                    self.logger.info("Refreshing system")
-                    self.reconnect_triad_vr()
-                if "calibrate" in data:
-                    self.calibrate_world_frame(*data["calibrate"])
-
-            # Update the GUI
-            if self.use_gui:
-                # Make sure all trackers are shown in the GUI regardless of if they are being subscribed to
-                for tracker_key in self.get_tracker_keys():
-                    if tracker_key not in messages["state"]:
-                        message = self.poll_tracker(tracker_key=tracker_key)
-                        if message is not None:
-                            messages["state"][tracker_key] = message
-                for reference_key in self.get_tracking_reference_keys():
-                    if reference_key not in messages["state"]:
-                        message = self.poll_tracking_reference(tracking_reference_key=reference_key)
-                        if message is not None:
-                            messages["state"][reference_key] = message
-
-                # Always send the current configuration to ensure synchronization with GUI
-                messages["config"] = self.config
-
-                self.pipe.send(messages)
+            # Process commands delivered over the optional pipe connection
+            if self.pipe is not None:
+                while self.pipe.poll():
+                    data = self.pipe.recv()
+                    if "config" in data:
+                        self.config = data["config"]
+                        self.logger.info("Configuration updated")
+                    if "save" in data:
+                        self.save_config(data["save"])
+                    if "refresh" in data:
+                        self.logger.info("Refreshing system")
+                        self.reconnect_triad_vr()
+                    if "calibrate" in data:
+                        self.calibrate_world_frame(*data["calibrate"])
 
     def resolve_name_to_key(self, name):
         """
@@ -519,39 +498,29 @@ class ViveTrackerServer(Server):
         self.output_file.write(recording_data + "\n")
 
 
-def run_server(port: int, pipe: Pipe, logging_queue: Queue, config: Path, use_gui: bool, should_record: bool = False):
-    vive_tracker_server = ViveTrackerServer(port=port, pipe=pipe, logging_queue=logging_queue, use_gui=use_gui,
+def run_server(port: int, logging_queue: Queue, config: Path, pipe: Optional[Connection] = None,
+               should_record: bool = False):
+    vive_tracker_server = ViveTrackerServer(port=port, logging_queue=logging_queue, pipe=pipe,
                                             config_path=config, should_record=should_record)
     vive_tracker_server.run()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Vive tracker server')
-    parser.add_argument('--headless', default=False, help='if true will not run the gui')
     parser.add_argument('--port', default=8000, help='port to broadcast tracker data on')
     parser.add_argument('--config', default=f"~/vive_ros2/config.yml",
                         help='tracker configuration file')
     args = parser.parse_args()
 
     logger_queue = Queue()
-    gui_conn, server_conn = Pipe()
     config = Path(args.config).expanduser()
     string_formatter = logging.Formatter(fmt='%(asctime)s|%(name)s|%(levelname)s|%(message)s', datefmt="%H:%M:%S")
 
-    if args.headless:
-        p = Process(target=run_server, args=(args.port, server_conn, logger_queue, config, False,))
-        p.start()
-        try:
-            # This should be updated to be a bit cleaner
-            while True:
-                print(string_formatter.format(logger_queue.get()))
-        finally:
-            p.kill()
-    else:
-        p = Process(target=run_server, args=(args.port, server_conn, logger_queue, config, True,))
-        p.start()
-        try:
-            gui = GuiManager(gui_conn, logger_queue)
-            gui.start()
-        finally:
-            p.kill()
+    p = Process(target=run_server, args=(args.port, logger_queue, config))
+    p.start()
+    try:
+        # This should be updated to be a bit cleaner
+        while True:
+            print(string_formatter.format(logger_queue.get()))
+    finally:
+        p.kill()
