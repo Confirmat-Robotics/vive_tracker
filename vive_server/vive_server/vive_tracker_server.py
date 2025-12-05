@@ -22,6 +22,18 @@ from base_server import Server
 from models import ViveDynamicObjectMessage, ViveStaticObjectMessage, Configuration
 from triad_openvr import TriadOpenVR
 
+# OpenVR tracking space (right, up, -forward) to ROS FLU (forward, left, up)
+# OpenVR basis: ex = +X (right), ey = +Y (up), ez = +Z (backward) so forward = -Z.
+# Desired ROS basis in OpenVR coords:
+#   x_ros (forward) = -Z_ovr -> [0, 0, -1]
+#   y_ros (left)    = -X_ovr -> [-1, 0, 0]
+#   z_ros (up)      =  Y_ovr -> [0, 1, 0]
+ROT_OVR_TO_ROS = transform.Rotation.from_matrix([
+    [0, 0, -1],
+    [-1, 0, 0],
+    [0, 1, 0],
+])
+
 
 def construct_socket_msg(data: ViveDynamicObjectMessage) -> str:
     """
@@ -359,34 +371,62 @@ class ViveTrackerServer(Server):
 
         """
         try:
-            _, _, _, r, p, y = device.get_pose_euler()
-            x, y, z, qw, qx, qy, qz = device.get_pose_quaternion()
+            # Raw pose in OpenVR space (right, up, backward; forward = -Z)
+            x_ovr, y_ovr, z_ovr, qw_ovr, qx_ovr, qy_ovr, qz_ovr = device.get_pose_quaternion()
 
-            vel_x, vel_y, vel_z = device.get_velocity()
-            p, q, r = device.get_angular_velocity()
-
-            # handle world transform
+            # Apply stored world calibration (vive -> world) in OpenVR frame
             rot_vw = self.get_rot_vw()
-            x, y, z = rot_vw.apply([x, y, z])
-            x, y, z = self.translate_to_origin(x, y, z)
+            x_cal, y_cal, z_cal = rot_vw.apply([x_ovr, y_ovr, z_ovr])
+            x_cal, y_cal, z_cal = self.translate_to_origin(x_cal, y_cal, z_cal)
 
-            # bring velocities into the local device frame such that positive x is pointing out the USB port
-            rot_lv = transform.Rotation.from_quat([qx, qy, qz, qw]) * transform.Rotation.from_matrix([[0, 1, 0],
-                                                                                                      [1, 0, 0],
-                                                                                                      [0, 0, -1]])
-            vel_x, vel_y, vel_z = rot_lv.apply([vel_x, vel_y, vel_z], inverse=True)
-            p, q, r = rot_lv.apply([p, q, r], inverse=True)
+            # Map position into ROS FLU
+            x_ros, y_ros, z_ros = ROT_OVR_TO_ROS.apply([x_cal, y_cal, z_cal])
 
-            qx, qy, qz, qw = rot_lv.inv().as_quat()
+            # Map orientation into ROS FLU
+            rot_ovr = transform.Rotation.from_quat([qx_ovr, qy_ovr, qz_ovr, qw_ovr])
+            rot_ros = ROT_OVR_TO_ROS * rot_ovr
+            qx_ros, qy_ros, qz_ros, qw_ros = rot_ros.as_quat()
+
+            # Map velocities and angular rates into ROS frame
+            vel = device.get_velocity()
+            ang = device.get_angular_velocity()
+            if vel is not None:
+                vel_arr = np.asarray(vel, dtype=float).reshape(-1)
+                if vel_arr.size >= 3:
+                    vel_x, vel_y, vel_z = ROT_OVR_TO_ROS.apply(vel_arr[:3])
+                else:
+                    vel_x = vel_y = vel_z = 0.0
+            else:
+                vel_x = vel_y = vel_z = 0.0
+            if ang is not None:
+                ang_arr = np.asarray(ang, dtype=float).reshape(-1)
+                if ang_arr.size >= 3:
+                    p, q, r = ROT_OVR_TO_ROS.apply(ang_arr[:3])
+                else:
+                    p = q = r = 0.0
+            else:
+                p = q = r = 0.0
 
             serial = device.get_serial()
             device_name = device_key if serial not in self.config.name_mappings else self.config.name_mappings[serial]
-            message = ViveDynamicObjectMessage(valid=True, x=x, y=y, z=z,
-                                               qx=qx, qy=qy, qz=qz, qw=qw,
-                                               vel_x=vel_x, vel_y=vel_y, vel_z=vel_z,
-                                               p=p, q=q, r=r,
-                                               device_name=device_name,
-                                               serial_num=serial)
+            message = ViveDynamicObjectMessage(
+                valid=True,
+                x=x_ros,
+                y=y_ros,
+                z=z_ros,
+                qx=qx_ros,
+                qy=qy_ros,
+                qz=qz_ros,
+                qw=qw_ros,
+                vel_x=vel_x,
+                vel_y=vel_y,
+                vel_z=vel_z,
+                p=p,
+                q=q,
+                r=r,
+                device_name=device_name,
+                serial_num=serial,
+            )
             return message
         except OSError as e:
             self.logger.error(f"OSError: {e}. Need to restart Vive Tracker Server")
@@ -413,13 +453,20 @@ class ViveTrackerServer(Server):
 
         """
         try:
-            x, y, z, qw, qx, qy, qz = device.get_pose_quaternion()
-            x, y, z = self.get_rot_vw().apply([x, y, z])
-            x, y, z = self.translate_to_origin(x, y, z)
+            x_ovr, y_ovr, z_ovr, qw_ovr, qx_ovr, qy_ovr, qz_ovr = device.get_pose_quaternion()
+            x_cal, y_cal, z_cal = self.get_rot_vw().apply([x_ovr, y_ovr, z_ovr])
+            x_cal, y_cal, z_cal = self.translate_to_origin(x_cal, y_cal, z_cal)
+
+            x_ros, y_ros, z_ros = ROT_OVR_TO_ROS.apply([x_cal, y_cal, z_cal])
+
+            rot_ovr = transform.Rotation.from_quat([qx_ovr, qy_ovr, qz_ovr, qw_ovr])
+            rot_ros = ROT_OVR_TO_ROS * rot_ovr
+            qx_ros, qy_ros, qz_ros, qw_ros = rot_ros.as_quat()
+
             serial = device.get_serial()
             device_name = device_key if serial not in self.config.name_mappings else self.config.name_mappings[serial]
-            message = ViveStaticObjectMessage(valid=True, x=x, y=y, z=z,
-                                              qx=qx, qy=qy, qz=qz, qw=qw,
+            message = ViveStaticObjectMessage(valid=True, x=x_ros, y=y_ros, z=z_ros,
+                                              qx=qx_ros, qy=qy_ros, qz=qz_ros, qw=qw_ros,
                                               device_name=device_name,
                                               serial_num=serial)
             return message
