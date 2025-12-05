@@ -68,15 +68,6 @@ class ViveTrackerNode(Node):
                 frame_id = self.link_name.get_parameter_value().string_value
                 child_frame_id = self.child_link_name.get_parameter_value().string_value
 
-                # Mapping Vive tracker message to ROS 2 Odometry message
-                # ROS x = Vive z
-                # ROS y = -Vive x
-                # ROS z = Vive y
-                # ROS qw = Vive qw
-                # ROS qx = -Vive qz 
-                # ROS qy = Vive qx
-                # ROS qz = -Vive qy
-
                 # Publish TF transform if enabled
                 if self.tf_broadcaster is not None:
                     t = TransformStamped()
@@ -84,13 +75,13 @@ class ViveTrackerNode(Node):
                     t.header.frame_id = frame_id
                     t.child_frame_id = child_frame_id
                     
-                    t.transform.translation.x = msg.z
-                    t.transform.translation.y = -1.0 * msg.x
-                    t.transform.translation.z = msg.y
+                    t.transform.translation.x = msg.x
+                    t.transform.translation.y = msg.y
+                    t.transform.translation.z = msg.z
                     
-                    t.transform.rotation.x = -msg.qz
-                    t.transform.rotation.y = msg.qx
-                    t.transform.rotation.z = -msg.qy
+                    t.transform.rotation.x = msg.qx
+                    t.transform.rotation.y = msg.qy
+                    t.transform.rotation.z = msg.qz
                     t.transform.rotation.w = msg.qw
                     
                     self.tf_broadcaster.sendTransform(t)
@@ -102,24 +93,22 @@ class ViveTrackerNode(Node):
 
                 odom_msg.child_frame_id = child_frame_id
 
-                odom_msg.pose.pose.position.x = msg.z
-                odom_msg.pose.pose.position.y = -1.0 * msg.x
-                odom_msg.pose.pose.position.z = msg.y
+                odom_msg.pose.pose.position.x = msg.x
+                odom_msg.pose.pose.position.y = msg.y
+                odom_msg.pose.pose.position.z = msg.z
 
-                odom_msg.pose.pose.orientation.x = -msg.qz
-                odom_msg.pose.pose.orientation.y = msg.qx
-                odom_msg.pose.pose.orientation.z = -msg.qy
+                odom_msg.pose.pose.orientation.x = msg.qx
+                odom_msg.pose.pose.orientation.y = msg.qy
+                odom_msg.pose.pose.orientation.z = msg.qz
                 odom_msg.pose.pose.orientation.w = msg.qw
 
-                odom_msg.twist.twist.linear.x = msg.vel_z
-                odom_msg.twist.twist.linear.y = -1.0 * msg.vel_x
-                odom_msg.twist.twist.linear.z = msg.vel_y
+                odom_msg.twist.twist.linear.x = msg.vel_x
+                odom_msg.twist.twist.linear.y = msg.vel_y
+                odom_msg.twist.twist.linear.z = msg.vel_z
 
-                # How to map anglular xyz when Vive provides pqr
-                # (original was x,y,z = p , q , r )
-                odom_msg.twist.twist.angular.x = -1.0 * msg.r
-                odom_msg.twist.twist.angular.y = msg.p
-                odom_msg.twist.twist.angular.z = -1.0 * msg.q
+                odom_msg.twist.twist.angular.x = msg.p
+                odom_msg.twist.twist.angular.y = msg.q
+                odom_msg.twist.twist.angular.z = msg.r
 
                 self.odom_pub.publish(odom_msg)
 
