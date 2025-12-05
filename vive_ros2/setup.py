@@ -15,6 +15,7 @@ setup(
         ("lib/" + package_name, [
             "scripts/vive_tracker_node",
             "scripts/vive_tracker_client",
+            "scripts/odom_transform_node",
         ]),
     ],
     install_requires=["setuptools", "pydantic", "scipy"],
@@ -28,6 +29,7 @@ setup(
         "console_scripts": [
             "vive_tracker_node = vive_ros2.vive_tracker_node:main",
             "vive_tracker_client = vive_ros2.vive_tracker_client:main",
+            "odom_transform_node = vive_ros2.odom_transform_node:main",
         ],
     },
 )
